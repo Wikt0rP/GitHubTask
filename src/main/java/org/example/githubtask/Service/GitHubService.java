@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.githubtask.DTO.GitHubBranchDTO;
 import org.example.githubtask.DTO.GitHubRepositoryDTO;
+import org.example.githubtask.Exception.GitHubUserNotFound;
+import org.example.githubtask.Response.FailedResponse;
 import org.example.githubtask.Response.GitHubSuccessfulResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,13 +32,25 @@ public class GitHubService {
     private String githubToken;
     private final String baseUrl = "https://api.github.com";
 
-    private static final Logger logger = LoggerFactory.getLogger(GitHubService.class);
-
 
     public ResponseEntity<?> handleGitHubRequest(String username){
         String fullUrl = getStringUrlUsersRepos(username);
 
-        return ResponseEntity.status(200).body(sendHttpRequestForGit(fullUrl));
+        try{
+            return ResponseEntity.status(HttpStatus.OK)
+                    .body(sendHttpRequestForGit(fullUrl));
+        } catch (GitHubUserNotFound e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new FailedResponse(HttpStatus.NOT_FOUND.value(), e.getMessage()));
+        }
+
+    }
+    private String getStringUrlUsersRepos(String username) {
+        URI baseUri = URI.create(baseUrl);
+        return UriComponentsBuilder.fromUri(baseUri)
+                .path("/users/{username}/repos")
+                .buildAndExpand(username)
+                .toUriString();
     }
 
 
@@ -52,14 +66,14 @@ public class GitHubService {
         Default: 30
 
      */
-    private GitHubSuccessfulResponse sendHttpRequestForGit(String fullUrl){
+    private GitHubSuccessfulResponse sendHttpRequestForGit(String fullUrl) throws GitHubUserNotFound {
         HttpRequest httpRequest = BuildRequest(fullUrl);
 
         try {
             HttpResponse<String> responseJsonString = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-            logger.info("Kod odpowiedzi: {}", responseJsonString.statusCode());
-            logger.debug("Body odpowiedzi: {}", responseJsonString.body());
 
+            if(responseJsonString.statusCode() == HttpStatus.NOT_FOUND.value())
+                throw new GitHubUserNotFound("User with given name does not exist");
             return new GitHubSuccessfulResponse(mapRepos(responseJsonString.body()));
         }
         catch (IOException | InterruptedException e) {
@@ -72,6 +86,7 @@ public class GitHubService {
         JsonNode root = mapper.readTree(json);
 
         List<GitHubRepositoryDTO> result = new ArrayList<>();
+
         for(JsonNode repoNode : root){
             String repoName = repoNode.get("name").asText();
             String ownerLogin = repoNode.get("owner").get("login").asText();
@@ -106,14 +121,13 @@ public class GitHubService {
 
         try {
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-            logger.info("Kod odpowiedzi: {}", response.statusCode());
-            logger.debug("Body odpowiedzi: {}", response.body());
             return response.body();
         }
         catch (IOException | InterruptedException e) {
             return null;
         }
     }
+
     private String getCommitMessage(String commitUrl){
         HttpRequest httpRequest = BuildRequest(commitUrl);
         try{
@@ -131,13 +145,6 @@ public class GitHubService {
         return null;
     }
 
-    private String getStringUrlUsersRepos(String username) {
-        URI baseUri = URI.create(baseUrl);
-        return UriComponentsBuilder.fromUri(baseUri)
-                .path("/users/{username}/repos")
-                .buildAndExpand(username)
-                .toUriString();
-    }
     private HttpRequest BuildRequest(String fullUrl) {
         return HttpRequest.newBuilder()
                 .uri(URI.create(fullUrl))
