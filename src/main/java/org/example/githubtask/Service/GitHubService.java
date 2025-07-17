@@ -77,7 +77,7 @@ public class GitHubService {
             return new GitHubSuccessfulResponse(mapRepos(responseJsonString.body()));
         }
         catch (IOException | InterruptedException e) {
-            return null;
+            throw new GitHubUserNotFound("Can not connect with api");
         }
     }
 
